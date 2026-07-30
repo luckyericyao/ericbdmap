@@ -27,6 +27,27 @@ type IntelligenceRecord = {
 
 type SyncStatus = "connecting" | "live" | "saving" | "local" | "error";
 
+type StructureVersionRecord = {
+  id: string;
+  companyId: string;
+  versionLabel: string;
+  sourceTitle: string;
+  sourceUrl: string | null;
+  articleDate: string | null;
+  originalFilename: string;
+  originalMimeType: string;
+  status: "Original captured" | "Replica in progress" | "Verified snapshot";
+  evidence: EvidenceLevel;
+  notes: string | null;
+  createdAt: string;
+  verifiedAt: string | null;
+  nodeCount: number;
+  edgeCount: number;
+  imageUrl: string;
+};
+
+type StructureMode = "original" | "interactive" | "validation";
+
 const navItems: { id: View; label: string; hint: string }[] = [
   { id: "map", label: "Global map", hint: "Portfolio" },
   { id: "company", label: "Company", hint: "Workspace" },
@@ -215,7 +236,7 @@ export default function BDMapApp() {
     (record) => record.companyId === selectedCompany.id,
   );
 
-  function openCompany(companyId: string, targetView: View = "company") {
+  function openCompany(companyId: string, targetView: View = "structure") {
     setSelectedCompanyId(companyId);
     setView(targetView);
   }
@@ -444,6 +465,7 @@ export default function BDMapApp() {
 
         {view === "structure" && (
           <StructureView
+            key={selectedCompany.id}
             company={selectedCompany}
             selectedNode={selectedNode}
             setSelectedNode={setSelectedNode}
@@ -982,129 +1004,578 @@ function StructureView({
   zoom: number;
   setZoom: (zoom: number) => void;
 }) {
+  const [mode, setMode] = useState<StructureMode>("original");
+  const [versions, setVersions] = useState<StructureVersionRecord[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState("");
+  const [archiveStatus, setArchiveStatus] = useState<
+    "loading" | "live" | "missing" | "error"
+  >("loading");
+  const [showUpload, setShowUpload] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [archiveNotice, setArchiveNotice] = useState("");
+  const referencedInPriorTracker = ["novartis", "amgen", "sanofi"].includes(
+    company.id,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/structures?companyId=${encodeURIComponent(company.id)}`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Archive unavailable");
+        return (await response.json()) as {
+          versions: StructureVersionRecord[];
+        };
+      })
+      .then((payload) => {
+        if (!cancelled) {
+          setVersions(payload.versions);
+          setSelectedVersionId(payload.versions[0]?.id ?? "");
+          setArchiveStatus(payload.versions.length ? "live" : "missing");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setArchiveStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [company.id]);
+
+  const activeVersion =
+    versions.find((version) => version.id === selectedVersionId) ?? versions[0];
+
+  async function uploadOriginal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setUploading(true);
+    setArchiveNotice("");
+    const form = new FormData(event.currentTarget);
+    form.set("companyId", company.id);
+
+    try {
+      const response = await fetch("/api/structure-assets", {
+        method: "POST",
+        body: form,
+      });
+      const result = (await response.json()) as {
+        version?: StructureVersionRecord;
+        error?: string;
+      };
+      if (!response.ok || !result.version) {
+        throw new Error(result.error ?? "Upload failed");
+      }
+      setVersions((current) => [result.version!, ...current]);
+      setSelectedVersionId(result.version.id);
+      setArchiveStatus("live");
+      setShowUpload(false);
+      setArchiveNotice("Original diagram archived as a new immutable version.");
+      event.currentTarget.reset();
+    } catch (error) {
+      setArchiveNotice(
+        error instanceof Error
+          ? error.message
+          : "The original diagram could not be archived.",
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const structureModes: {
+    id: StructureMode;
+    label: string;
+    hint: string;
+  }[] = [
+    { id: "original", label: "Original diagram", hint: "Source of truth" },
+    { id: "interactive", label: "Interactive replica", hint: "Nodes & reporting lines" },
+    { id: "validation", label: "Current validation", hint: "What changed" },
+  ];
+
   return (
     <div className="structure-layout">
       <div className="structure-main">
         <section className="structure-header">
           <div>
-            <span className="eyebrow">{company.name} · Decision system</span>
-            <h1>Structure is a route, not a directory.</h1>
+            <span className="eyebrow">{company.name} · Structure archive</span>
+            <h1>The original diagram comes first.</h1>
             <p>
-              Read from sponsorship to evaluation, transaction and execution.
-              Dashed relationships are hypotheses that still need confirmation.
+              Preserve the author&apos;s exact hierarchy before adding our
+              interpretation. Every replica and verification must point back to
+              a permanent original version.
             </p>
           </div>
-          <div className="structure-controls">
-            <button onClick={() => setZoom(Math.max(80, zoom - 10))}>−</button>
-            <span>{zoom}%</span>
-            <button onClick={() => setZoom(Math.min(120, zoom + 10))}>＋</button>
-            <button className="fit-button" onClick={() => setZoom(100)}>
-              Fit
-            </button>
-          </div>
+          {mode === "interactive" && (
+            <div className="structure-controls">
+              <button onClick={() => setZoom(Math.max(80, zoom - 10))}>−</button>
+              <span>{zoom}%</span>
+              <button onClick={() => setZoom(Math.min(120, zoom + 10))}>＋</button>
+              <button className="fit-button" onClick={() => setZoom(100)}>
+                Fit
+              </button>
+            </div>
+          )}
         </section>
 
-        <section className="structure-canvas">
-          <div className="canvas-grid" aria-hidden="true" />
-          <div
-            className="org-chart"
-            style={{ transform: `scale(${zoom / 100})` }}
-          >
+        <section className="structure-mode-tabs" aria-label="Structure layers">
+          {structureModes.map((item, index) => (
             <button
-              className={`org-node org-top ${selectedNode.id === structureNodes[0].id ? "is-selected" : ""}`}
-              onClick={() => setSelectedNode(structureNodes[0])}
+              key={item.id}
+              className={mode === item.id ? "is-active" : ""}
+              onClick={() => setMode(item.id)}
             >
-              <span className="node-kicker">Enterprise</span>
-              <strong>{structureNodes[0].role}</strong>
-              <small>{structureNodes[0].scope}</small>
-              <EvidenceBadge level={structureNodes[0].level} />
+              <span>0{index + 1}</span>
+              <strong>{item.label}</strong>
+              <small>{item.hint}</small>
             </button>
-            <span className="connector connector-vertical top-connector" />
-            <button
-              className={`org-node org-core ${selectedNode.id === structureNodes[1].id ? "is-selected" : ""}`}
-              onClick={() => setSelectedNode(structureNodes[1])}
-            >
-              <span className="node-kicker">Global function</span>
-              <strong>{structureNodes[1].role}</strong>
-              <small>{structureNodes[1].scope}</small>
-              <EvidenceBadge level={structureNodes[1].level} />
-            </button>
-            <span className="connector connector-vertical core-connector" />
-            <span className="connector connector-horizontal branch-connector" />
-            <div className="org-branches">
-              {structureNodes.slice(2).map((node) => (
-                <div className="branch-wrap" key={node.id}>
-                  <span
-                    className={`connector connector-vertical branch-line ${node.level === "C" ? "is-dashed" : ""}`}
-                  />
-                  <button
-                    className={`org-node org-branch ${selectedNode.id === node.id ? "is-selected" : ""} ${node.level === "C" ? "is-hypothesis" : ""}`}
-                    onClick={() => setSelectedNode(node)}
-                  >
-                    <span className="node-kicker">
-                      {node.id === "se" ? "Scientific ownership" : "Partnering function"}
+          ))}
+        </section>
+
+        {mode === "original" && (
+          <section className="original-archive">
+            {activeVersion ? (
+              <>
+                <div className="original-meta-bar">
+                  <div>
+                    <span className="archive-status archive-complete">
+                      Original captured
                     </span>
-                    <strong>{node.role}</strong>
-                    <small>{node.scope}</small>
-                    <EvidenceBadge level={node.level} />
-                  </button>
-                  {node.id === "se" && (
-                    <div className="person-stack">
-                      <span className="mini-person">Therapy lead</span>
-                      <span className="mini-person">Modality lead</span>
-                    </div>
+                    <strong>{activeVersion.versionLabel}</strong>
+                    <small>{activeVersion.sourceTitle}</small>
+                  </div>
+                  <div>
+                    <EvidenceBadge level={activeVersion.evidence} />
+                    <button
+                      className="secondary-button"
+                      onClick={() => setShowUpload((current) => !current)}
+                    >
+                      Add newer version
+                    </button>
+                  </div>
+                </div>
+                <div className="original-image-stage">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={activeVersion.imageUrl}
+                    alt={`${company.name} original BD organization diagram — ${activeVersion.versionLabel}`}
+                  />
+                </div>
+                <div className="original-source-line">
+                  <div>
+                    <span>Article date</span>
+                    <strong>{activeVersion.articleDate ?? "Not recorded"}</strong>
+                  </div>
+                  <div>
+                    <span>Original file</span>
+                    <strong>{activeVersion.originalFilename}</strong>
+                  </div>
+                  <div>
+                    <span>Captured</span>
+                    <strong>{formatRecordDate(activeVersion.createdAt)}</strong>
+                  </div>
+                  {activeVersion.sourceUrl ? (
+                    <a
+                      href={activeVersion.sourceUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open article ↗
+                    </a>
+                  ) : (
+                    <span className="source-link-missing">Article URL missing</span>
                   )}
+                </div>
+              </>
+            ) : (
+              <div className="original-missing-state">
+                <span className="missing-diagram-mark">□</span>
+                <span className="archive-status archive-missing">
+                  Original file missing
+                </span>
+                <h2>Do not promote the reconstruction as the source.</h2>
+                <p>
+                  {archiveStatus === "loading"
+                    ? "Checking the permanent structure archive…"
+                    : referencedInPriorTracker
+                      ? "A complete original was referenced in the earlier tracker, but the image file is not present in this website archive. Transfer it here before marking this company as captured."
+                      : "The original BD Scholar diagram has not been recovered. The interactive view remains a clearly labeled working hypothesis until this source is uploaded."}
+                </p>
+                <button
+                  className="primary-button"
+                  onClick={() => setShowUpload(true)}
+                >
+                  Archive original diagram
+                </button>
+              </div>
+            )}
+
+            {(showUpload || (!activeVersion && archiveStatus !== "loading")) && (
+              <form className="structure-upload-form" onSubmit={uploadOriginal}>
+                <div className="upload-form-heading">
+                  <div>
+                    <span className="eyebrow">Permanent source capture</span>
+                    <h2>Archive an original version</h2>
+                  </div>
+                  {activeVersion && (
+                    <button
+                      type="button"
+                      onClick={() => setShowUpload(false)}
+                      aria-label="Close upload form"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+                <input type="hidden" name="companyId" value={company.id} />
+                <label className="diagram-dropzone">
+                  <span className="dropzone-mark">＋</span>
+                  <strong>Choose the complete, uncropped diagram</strong>
+                  <small>PNG, JPEG or WebP · up to 15 MB</small>
+                  <input
+                    type="file"
+                    name="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    required
+                  />
+                </label>
+                <div className="form-row">
+                  <label>
+                    Version label
+                    <input
+                      name="versionLabel"
+                      placeholder="BD Scholar · 2026-05"
+                      maxLength={100}
+                      required
+                    />
+                  </label>
+                  <label>
+                    Article date
+                    <input name="articleDate" type="date" />
+                  </label>
+                </div>
+                <label>
+                  Source title
+                  <input
+                    name="sourceTitle"
+                    placeholder={`${company.name} BD organization analysis`}
+                    maxLength={180}
+                    required
+                  />
+                </label>
+                <label>
+                  Article URL · Optional
+                  <input
+                    name="sourceUrl"
+                    type="url"
+                    placeholder="https://mp.weixin.qq.com/s/..."
+                    maxLength={2000}
+                  />
+                </label>
+                <label>
+                  Capture notes · Optional
+                  <textarea
+                    name="notes"
+                    rows={3}
+                    placeholder="What is complete, cropped, unclear, or still needs verification?"
+                    maxLength={2000}
+                  />
+                </label>
+                {archiveNotice && (
+                  <div className="archive-notice">{archiveNotice}</div>
+                )}
+                <div className="modal-actions">
+                  <button
+                    type="submit"
+                    className="primary-button"
+                    disabled={uploading}
+                  >
+                    {uploading ? "Archiving…" : "Archive immutable version"}
+                  </button>
+                </div>
+              </form>
+            )}
+          </section>
+        )}
+
+        {mode === "interactive" && (
+          <>
+            <div
+              className={
+                activeVersion
+                  ? "replica-status replica-incomplete"
+                  : "replica-status replica-warning"
+              }
+            >
+              <strong>
+                {activeVersion
+                  ? activeVersion.nodeCount
+                    ? `${activeVersion.nodeCount} nodes and ${activeVersion.edgeCount} relationships captured`
+                    : "Original stored · node-by-node replica still pending"
+                  : "Working reconstruction only · no original source attached"}
+              </strong>
+              <span>
+                {activeVersion
+                  ? "The canvas below remains provisional until every node, line style and original coordinate is captured."
+                  : "Do not treat this canvas as a faithful reproduction of the BD Scholar diagram."}
+              </span>
+            </div>
+            <section className="structure-canvas">
+              <div className="canvas-grid" aria-hidden="true" />
+              <div
+                className="org-chart"
+                style={{ transform: `scale(${zoom / 100})` }}
+              >
+                <button
+                  className={`org-node org-top ${selectedNode.id === structureNodes[0].id ? "is-selected" : ""}`}
+                  onClick={() => setSelectedNode(structureNodes[0])}
+                >
+                  <span className="node-kicker">Enterprise</span>
+                  <strong>{structureNodes[0].role}</strong>
+                  <small>{structureNodes[0].scope}</small>
+                  <EvidenceBadge level={structureNodes[0].level} />
+                </button>
+                <span className="connector connector-vertical top-connector" />
+                <button
+                  className={`org-node org-core ${selectedNode.id === structureNodes[1].id ? "is-selected" : ""}`}
+                  onClick={() => setSelectedNode(structureNodes[1])}
+                >
+                  <span className="node-kicker">Global function</span>
+                  <strong>{structureNodes[1].role}</strong>
+                  <small>{structureNodes[1].scope}</small>
+                  <EvidenceBadge level={structureNodes[1].level} />
+                </button>
+                <span className="connector connector-vertical core-connector" />
+                <span className="connector connector-horizontal branch-connector" />
+                <div className="org-branches">
+                  {structureNodes.slice(2).map((node) => (
+                    <div className="branch-wrap" key={node.id}>
+                      <span
+                        className={`connector connector-vertical branch-line ${node.level === "C" ? "is-dashed" : ""}`}
+                      />
+                      <button
+                        className={`org-node org-branch ${selectedNode.id === node.id ? "is-selected" : ""} ${node.level === "C" ? "is-hypothesis" : ""}`}
+                        onClick={() => setSelectedNode(node)}
+                      >
+                        <span className="node-kicker">
+                          {node.id === "se"
+                            ? "Scientific ownership"
+                            : "Partnering function"}
+                        </span>
+                        <strong>{node.role}</strong>
+                        <small>{node.scope}</small>
+                        <EvidenceBadge level={node.level} />
+                      </button>
+                      {node.id === "se" && (
+                        <div className="person-stack">
+                          <span className="mini-person">Therapy lead</span>
+                          <span className="mini-person">Modality lead</span>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="canvas-caption">
+                <span className="solid-line" /> Confirmed reporting relationship
+                <span className="dashed-line" /> Working hypothesis
+              </div>
+            </section>
+          </>
+        )}
+
+        {mode === "validation" && (
+          <section className="validation-workspace">
+            <div className="validation-summary-grid">
+              <article className={activeVersion ? "is-complete" : "is-missing"}>
+                <span>01 · Original source</span>
+                <strong>
+                  {activeVersion ? "Permanent file captured" : "Source file missing"}
+                </strong>
+                <p>
+                  {activeVersion
+                    ? `${activeVersion.versionLabel} · ${activeVersion.sourceTitle}`
+                    : "No original image can currently be used to check the reconstruction."}
+                </p>
+              </article>
+              <article
+                className={
+                  activeVersion?.nodeCount ? "is-complete" : "is-incomplete"
+                }
+              >
+                <span>02 · Interactive replica</span>
+                <strong>
+                  {activeVersion?.nodeCount
+                    ? `${activeVersion.nodeCount} nodes captured`
+                    : "Replica capture pending"}
+                </strong>
+                <p>
+                  Original positions, line styles, arrows and reporting
+                  relationships must be transcribed without auto-layout.
+                </p>
+              </article>
+              <article
+                className={activeVersion?.verifiedAt ? "is-complete" : "is-incomplete"}
+              >
+                <span>03 · Current validation</span>
+                <strong>
+                  {activeVersion?.verifiedAt
+                    ? `Verified ${formatRecordDate(activeVersion.verifiedAt)}`
+                    : "Current-state review pending"}
+                </strong>
+                <p>
+                  People and reporting lines need official confirmation before
+                  they are marked current.
+                </p>
+              </article>
+            </div>
+            <div className="validation-table">
+              <div className="validation-table-head">
+                <span>Function</span>
+                <span>Article structure</span>
+                <span>Current status</span>
+                <span>Evidence</span>
+              </div>
+              {structureNodes.map((node) => (
+                <div className="validation-row" key={node.id}>
+                  <strong>{node.role}</strong>
+                  <span>{node.scope}</span>
+                  <span
+                    className={
+                      node.level === "C"
+                        ? "validation-status is-unverified"
+                        : "validation-status"
+                    }
+                  >
+                    {node.status}
+                  </span>
+                  <EvidenceBadge level={node.level} />
                 </div>
               ))}
             </div>
-          </div>
-          <div className="canvas-caption">
-            <span className="solid-line" /> Confirmed reporting relationship
-            <span className="dashed-line" /> Working hypothesis
-          </div>
-        </section>
+          </section>
+        )}
       </div>
 
       <aside className="node-drawer">
-        <div className="drawer-heading">
-          <span className="eyebrow">Selected function</span>
-          <EvidenceBadge level={selectedNode.level} />
-        </div>
-        <h2>{selectedNode.role}</h2>
-        <p>{selectedNode.scope}</p>
-        <div className="drawer-section">
-          <span>Role in the deal</span>
-          <strong>
-            {selectedNode.id === "se"
-              ? "Builds the internal scientific case and finds the right champion."
-              : selectedNode.id === "transactions"
-                ? "Turns sponsored interest into executable deal structure."
-                : "Connects this step to the broader partnering decision."}
-          </strong>
-        </div>
-        <div className="drawer-section">
-          <span>Evidence status</span>
-          <div className="drawer-evidence">
-            <EvidenceBadge level={selectedNode.level} />
-            <div>
-              <strong>{selectedNode.status}</strong>
-              <small>Reviewed {company.verifiedAt}</small>
+        {mode === "original" && (
+          <>
+            <div className="drawer-heading">
+              <span className="eyebrow">Version archive</span>
+              <span className="archive-count">{versions.length}</span>
             </div>
-          </div>
-        </div>
-        <div className="drawer-section">
-          <span>Known people</span>
-          <div className="empty-people">
-            <div className="empty-person-mark">＋</div>
-            <p>No verified person attached yet.</p>
-            <button>Add a person</button>
-          </div>
-        </div>
-        <div className="drawer-section">
-          <span>Eric&apos;s action</span>
-          <strong>{company.nextAction}</strong>
-          <small>Owner · {company.owner} · Due {company.nextActionDate}</small>
-        </div>
+            <h2>Original history</h2>
+            <p>
+              Every upload creates a new source version. Earlier diagrams remain
+              available for historical comparison.
+            </p>
+            <div className="version-list">
+              {versions.map((version) => (
+                <button
+                  key={version.id}
+                  className={
+                    activeVersion?.id === version.id ? "is-selected" : ""
+                  }
+                  onClick={() => setSelectedVersionId(version.id)}
+                >
+                  <EvidenceBadge level={version.evidence} />
+                  <span>
+                    <strong>{version.versionLabel}</strong>
+                    <small>{version.sourceTitle}</small>
+                  </span>
+                  <span>{formatRecordDate(version.createdAt)}</span>
+                </button>
+              ))}
+              {!versions.length && (
+                <div className="version-empty">
+                  <strong>No original versions archived</strong>
+                  <p>The gap is explicit and searchable.</p>
+                </div>
+              )}
+            </div>
+            <div className="drawer-section">
+              <span>Capture standard</span>
+              <strong>Complete, uncropped and linked to the article.</strong>
+              <small>
+                Never replace the author&apos;s diagram with a simplified
+                reconstruction.
+              </small>
+            </div>
+          </>
+        )}
+
+        {mode === "interactive" && (
+          <>
+            <div className="drawer-heading">
+              <span className="eyebrow">Selected function</span>
+              <EvidenceBadge level={selectedNode.level} />
+            </div>
+            <h2>{selectedNode.role}</h2>
+            <p>{selectedNode.scope}</p>
+            <div className="drawer-section">
+              <span>Role in the deal</span>
+              <strong>
+                {selectedNode.id === "se"
+                  ? "Builds the internal scientific case and finds the right champion."
+                  : selectedNode.id === "transactions"
+                    ? "Turns sponsored interest into executable deal structure."
+                    : "Connects this step to the broader partnering decision."}
+              </strong>
+            </div>
+            <div className="drawer-section">
+              <span>Evidence status</span>
+              <div className="drawer-evidence">
+                <EvidenceBadge level={selectedNode.level} />
+                <div>
+                  <strong>{selectedNode.status}</strong>
+                  <small>Reviewed {company.verifiedAt}</small>
+                </div>
+              </div>
+            </div>
+            <div className="drawer-section">
+              <span>Known people</span>
+              <div className="empty-people">
+                <div className="empty-person-mark">＋</div>
+                <p>No verified person attached yet.</p>
+                <button>Add a person</button>
+              </div>
+            </div>
+            <div className="drawer-section">
+              <span>Eric&apos;s action</span>
+              <strong>{company.nextAction}</strong>
+              <small>Owner · {company.owner} · Due {company.nextActionDate}</small>
+            </div>
+          </>
+        )}
+
+        {mode === "validation" && (
+          <>
+            <div className="drawer-heading">
+              <span className="eyebrow">Evidence discipline</span>
+            </div>
+            <h2>What can we claim?</h2>
+            <p>
+              The diagram, the replica and the current company state are three
+              separate evidence layers.
+            </p>
+            {evidenceLegend.map((item) => (
+              <div className="drawer-evidence-rule" key={item.level}>
+                <EvidenceBadge level={item.level} />
+                <div>
+                  <strong>{item.label}</strong>
+                  <small>{item.description}</small>
+                </div>
+              </div>
+            ))}
+            <div className="drawer-section validation-warning">
+              <span>Non-negotiable</span>
+              <strong>
+                A reconstructed structure never becomes “original” through
+                repetition.
+              </strong>
+            </div>
+          </>
+        )}
       </aside>
     </div>
   );

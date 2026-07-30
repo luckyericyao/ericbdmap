@@ -4,14 +4,19 @@ A living partnering-intelligence workspace for mapping multinational pharma
 strategy, decision structures, relationship strength, active opportunities, and
 the next action that advances a deal.
 
-## First-version scope
+## Current scope
 
 - **Global Map** — compare MNC strategic fit, relationship state, evidence
   confidence, therapeutic focus, and modalities.
 - **Company Workspace** — bring official facts, BD Scholar analysis, Eric's
   judgment, active routes, and next actions into one company view.
-- **Structure** — inspect the path from enterprise strategy through Search &
-  Evaluation, Transactions, Alliance Management, and regional partnering.
+- **Structure Archive** — make the original BD Scholar diagram the source of
+  truth, then keep its interactive replica and current validation as separate
+  evidence layers.
+- **Immutable source versions** — archive complete original PNG, JPEG, or WebP
+  diagrams with their article title, URL, date, notes, and capture time.
+- **Replica-ready data model** — preserve every node, relationship, original
+  coordinate, box size, line style, arrow direction, and verification state.
 - **Engagement** — track opportunities by stage, owner, deadline, and next move.
 - **Shared intelligence records** — add, edit, and delete intelligence,
   contacts, and actions across signed-in devices.
@@ -27,8 +32,9 @@ the initial research brief. Evidence labels are intentionally visible:
 - **D** — unverified lead
 
 Do not treat the seed organization relationships or contact gaps as a finished
-intelligence dataset. They are designed to make provenance and verification
-status operational from the first version.
+intelligence dataset. The provisional canvas is deliberately labeled as a
+working reconstruction until an original source file and its node-by-node
+replica have been captured.
 
 ## Local development
 
@@ -50,15 +56,24 @@ pnpm build
 
 ## Data architecture
 
-User-created intelligence records are stored in Cloudflare D1 through
-`/api/intelligence`. The production site is owner-only, while the record schema
-keeps source and evidence confidence explicit. Browser storage is only used as
-a temporary fallback when the shared workspace cannot be reached.
+Cloudflare D1 stores intelligence records plus structure versions, nodes, and
+edges. Cloudflare R2 stores the original diagram files privately; the app
+streams them through `/api/structure-assets` instead of exposing a public
+bucket. A new upload appends an immutable version rather than overwriting
+history.
 
-The next product milestone expands the shared data model to:
+The structure data model keeps the three layers separate:
 
-1. companies, teams, people, and reporting relationships;
-2. source URLs and a full verification history;
-3. opportunities, interactions, next actions, and internal owners;
-4. role-level access for private relationship notes;
-5. import tooling for the BD Scholar tracker workbook.
+1. **Original** — the complete author-created image and article metadata.
+2. **Interactive replica** — nodes, reporting relationships, coordinates,
+   dimensions, line styles, and arrows transcribed from that exact version.
+3. **Current validation** — official confirmation, changes, unresolved claims,
+   and the latest verification date.
+
+User-created intelligence, contacts, and actions continue to use
+`/api/intelligence`. Browser storage is only a temporary fallback when the
+shared workspace cannot be reached.
+
+The next product milestone is the node-and-edge transcription editor, followed
+by tracker workbook import and role-level access for private relationship
+notes.

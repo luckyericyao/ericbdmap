@@ -21,3 +21,13 @@ export function getD1() {
 
   return env.DB;
 }
+
+export function getStructureAssets() {
+  if (!env.BD_ASSETS) {
+    throw new Error(
+      "Cloudflare R2 binding `BD_ASSETS` is unavailable. Configure the structure asset binding before storing original diagrams.",
+    );
+  }
+
+  return env.BD_ASSETS;
+}
