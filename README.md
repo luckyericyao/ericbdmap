@@ -52,7 +52,14 @@ Open `http://localhost:3000`.
 ```bash
 pnpm lint
 pnpm build
+pnpm build:vercel
 ```
+
+`pnpm build` produces the Cloudflare-compatible Sites deployment. Vercel uses
+the native Next.js build declared in `vercel.json`; its deployment is a
+secondary preview and intentionally has no access to the private D1/R2 data
+bindings. Shared intelligence and original-diagram uploads remain available
+only on the owner-only Sites deployment.
 
 ## Data architecture
 

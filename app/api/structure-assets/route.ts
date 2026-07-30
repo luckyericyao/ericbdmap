@@ -37,7 +37,8 @@ export async function GET(request: Request) {
       return Response.json({ error: "Invalid structure asset." }, { status: 400 });
     }
 
-    const object = await getStructureAssets().get(key);
+    const bucket = await getStructureAssets();
+    const object = await bucket.get(key);
     if (!object) {
       return Response.json({ error: "Original diagram not found." }, { status: 404 });
     }
@@ -98,7 +99,7 @@ export async function POST(request: Request) {
     const id = `structure-${crypto.randomUUID()}`;
     const key = `structures/${companyId}/${id}.${extension}`;
     const createdAt = Date.now();
-    const bucket = getStructureAssets();
+    const bucket = await getStructureAssets();
     await bucket.put(key, file.stream(), {
       httpMetadata: {
         contentType: file.type,
@@ -112,7 +113,8 @@ export async function POST(request: Request) {
     });
 
     try {
-      await getD1()
+      const d1 = await getD1();
+      await d1
         .prepare(
           `INSERT INTO structure_versions
             (id, company_id, version_label, source_title, source_url, article_date,

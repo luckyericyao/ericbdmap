@@ -127,7 +127,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const versionId = cleanId(url.searchParams.get("versionId"));
     const companyId = cleanId(url.searchParams.get("companyId"));
-    const d1 = getD1();
+    const d1 = await getD1();
 
     if (versionId) {
       const [versionResult, nodeResult, edgeResult] = await Promise.all([

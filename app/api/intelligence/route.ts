@@ -69,7 +69,7 @@ export async function GET(request: Request) {
       new URL(request.url).searchParams.get("companyId"),
       80,
     );
-    const d1 = getD1();
+    const d1 = await getD1();
     const statement = companyId
       ? d1
           .prepare(
@@ -130,7 +130,7 @@ export async function POST(request: Request) {
 
     const id = `record-${crypto.randomUUID()}`;
     const now = Date.now();
-    const d1 = getD1();
+    const d1 = await getD1();
     await d1
       .prepare(
         `INSERT INTO intelligence_records
@@ -209,7 +209,7 @@ export async function PATCH(request: Request) {
     }
 
     const updatedAt = Date.now();
-    const d1 = getD1();
+    const d1 = await getD1();
     await d1
       .prepare(
         `UPDATE intelligence_records
@@ -257,7 +257,7 @@ export async function DELETE(request: Request) {
       );
     }
 
-    const d1 = getD1();
+    const d1 = await getD1();
     await d1
       .prepare("DELETE FROM intelligence_records WHERE id = ?")
       .bind(id)
