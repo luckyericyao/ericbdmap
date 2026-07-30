@@ -305,51 +305,6 @@ export const opportunities: Opportunity[] = [
   },
 ];
 
-export const structureNodes = [
-  {
-    id: "strategy",
-    role: "Corporate Strategy & Growth",
-    scope: "Enterprise priorities",
-    level: "A" as EvidenceLevel,
-    status: "Official",
-  },
-  {
-    id: "bdl",
-    role: "Global BD & Licensing",
-    scope: "Partnering mandate",
-    level: "A" as EvidenceLevel,
-    status: "Official",
-  },
-  {
-    id: "se",
-    role: "Search & Evaluation",
-    scope: "Scientific fit & champion",
-    level: "B" as EvidenceLevel,
-    status: "Article + official",
-  },
-  {
-    id: "transactions",
-    role: "Transactions",
-    scope: "Structure & negotiation",
-    level: "B" as EvidenceLevel,
-    status: "Article + official",
-  },
-  {
-    id: "alliance",
-    role: "Alliance Management",
-    scope: "Post-deal execution",
-    level: "B" as EvidenceLevel,
-    status: "Article + official",
-  },
-  {
-    id: "regional",
-    role: "Regional Partnering",
-    scope: "APAC entry & scouting",
-    level: "C" as EvidenceLevel,
-    status: "Needs verification",
-  },
-];
-
 export const evidenceLegend = [
   { level: "A", label: "Officially verified", description: "Company or primary source" },
   { level: "B", label: "Corroborated", description: "Article plus supporting evidence" },

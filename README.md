@@ -13,6 +13,9 @@ the next action that advances a deal.
 - **Structure Archive** — make the original BD Scholar diagram the source of
   truth, then keep its interactive replica and current validation as separate
   evidence layers.
+- **Named people structures** — map 76 current or published owners across the
+  eight seeded MNCs, including roles, functional groups, deal responsibilities,
+  locations, evidence, source links, and qualified reporting relationships.
 - **Immutable source versions** — archive complete original PNG, JPEG, or WebP
   diagrams with their article title, URL, date, notes, and capture time.
 - **Replica-ready data model** — preserve every node, relationship, original
@@ -31,10 +34,11 @@ the initial research brief. Evidence labels are intentionally visible:
 - **C** — working hypothesis that needs confirmation
 - **D** — unverified lead
 
-Do not treat the seed organization relationships or contact gaps as a finished
-intelligence dataset. The provisional canvas is deliberately labeled as a
-working reconstruction until an original source file and its node-by-node
-replica have been captured.
+The people view distinguishes explicit reporting or ownership from functional
+team membership: solid links are directly supported, while dashed links never
+claim a direct report that the source does not publish. Do not treat contact
+gaps as a finished intelligence dataset. The original BD Scholar layout remains
+separate until its source image and node-by-node replica have been captured.
 
 ## Local development
 

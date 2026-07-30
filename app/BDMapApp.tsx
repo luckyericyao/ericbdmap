@@ -6,9 +6,9 @@ import {
   evidenceLegend,
   intelNotes,
   opportunities,
-  structureNodes,
   type EvidenceLevel,
 } from "./bd-data";
+import { companyPeopleStructures } from "./structure-data";
 
 type View = "map" | "company" | "structure" | "engagement";
 
@@ -142,7 +142,6 @@ export default function BDMapApp() {
   const [mapDepth, setMapDepth] = useState<"Companies" | "Functions" | "People">(
     "Companies",
   );
-  const [selectedNode, setSelectedNode] = useState(structureNodes[1]);
   const [zoom, setZoom] = useState(100);
   const [isAdding, setIsAdding] = useState(false);
   const [editingRecord, setEditingRecord] =
@@ -386,13 +385,13 @@ export default function BDMapApp() {
 
         <section className="coverage-card">
           <div className="coverage-heading">
-            <span>Map coverage</span>
-            <strong>34%</strong>
+            <span>Named people</span>
+            <strong>76</strong>
           </div>
           <div className="coverage-track">
             <span />
           </div>
-          <p>8 companies mapped · 3 verified this month</p>
+          <p>8 companies · sourced roles and qualified links</p>
           <button onClick={() => setView("map")}>View evidence gaps</button>
         </section>
 
@@ -467,8 +466,6 @@ export default function BDMapApp() {
           <StructureView
             key={selectedCompany.id}
             company={selectedCompany}
-            selectedNode={selectedNode}
-            setSelectedNode={setSelectedNode}
             zoom={zoom}
             setZoom={setZoom}
           />
@@ -742,9 +739,17 @@ function MapView({
               </div>
               {mapDepth === "People" && (
                 <div className="company-people">
-                  <span>Owner</span>
-                  <strong>{company.owner}</strong>
-                  <span>{company.opportunities} active routes</span>
+                  <span>Named structure</span>
+                  <strong>
+                    {companyPeopleStructures[company.id]?.nodes.length ?? 0}{" "}
+                    people
+                  </strong>
+                  <span>
+                    {companyPeopleStructures[company.id]?.nodes.filter(
+                      (node) => node.relationshipConfirmed,
+                    ).length ?? 0}{" "}
+                    confirmed links
+                  </span>
                 </div>
               )}
               <div className="fit-line">
@@ -993,18 +998,25 @@ function CompanyView({
 
 function StructureView({
   company,
-  selectedNode,
-  setSelectedNode,
   zoom,
   setZoom,
 }: {
   company: (typeof companies)[number];
-  selectedNode: (typeof structureNodes)[number];
-  setSelectedNode: (node: (typeof structureNodes)[number]) => void;
   zoom: number;
   setZoom: (zoom: number) => void;
 }) {
-  const [mode, setMode] = useState<StructureMode>("original");
+  const peopleStructure = companyPeopleStructures[company.id];
+  const peopleNodes = peopleStructure?.nodes ?? [];
+  const initialPeopleNode =
+    peopleNodes.find((node) =>
+      /Global Head|Senior Vice President|Head of Corporate|Head of Business/.test(
+        node.role,
+      ),
+    ) ?? peopleNodes[0];
+  const [selectedPeopleNodeId, setSelectedPeopleNodeId] = useState(
+    initialPeopleNode?.id ?? "",
+  );
+  const [mode, setMode] = useState<StructureMode>("interactive");
   const [versions, setVersions] = useState<StructureVersionRecord[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState("");
   const [archiveStatus, setArchiveStatus] = useState<
@@ -1016,6 +1028,18 @@ function StructureView({
   const referencedInPriorTracker = ["novartis", "amgen", "sanofi"].includes(
     company.id,
   );
+  const selectedPeopleNode =
+    peopleNodes.find((node) => node.id === selectedPeopleNodeId) ??
+    initialPeopleNode;
+  const selectedParent = selectedPeopleNode?.parentId
+    ? peopleNodes.find((node) => node.id === selectedPeopleNode.parentId)
+    : undefined;
+  const peopleGroups = Array.from(
+    new Set(peopleNodes.map((node) => node.group)),
+  );
+  const confirmedRelationshipCount = peopleNodes.filter(
+    (node) => node.relationshipConfirmed,
+  ).length;
 
   useEffect(() => {
     let cancelled = false;
@@ -1089,8 +1113,12 @@ function StructureView({
     hint: string;
   }[] = [
     { id: "original", label: "Original diagram", hint: "Source of truth" },
-    { id: "interactive", label: "Interactive replica", hint: "Nodes & reporting lines" },
-    { id: "validation", label: "Current validation", hint: "What changed" },
+    {
+      id: "interactive",
+      label: "People structure",
+      hint: "Named owners & reporting lines",
+    },
+    { id: "validation", label: "Source validation", hint: "Claim by claim" },
   ];
 
   return (
@@ -1099,11 +1127,11 @@ function StructureView({
         <section className="structure-header">
           <div>
             <span className="eyebrow">{company.name} · Structure archive</span>
-            <h1>The original diagram comes first.</h1>
+            <h1>People, ownership and reporting lines.</h1>
             <p>
-              Preserve the author&apos;s exact hierarchy before adding our
-              interpretation. Every replica and verification must point back to
-              a permanent original version.
+              The original diagram remains preserved separately. This working
+              map names the real decision owners, shows what relationship is
+              confirmed, and labels every inferred connection.
             </p>
           </div>
           {mode === "interactive" && (
@@ -1300,85 +1328,102 @@ function StructureView({
 
         {mode === "interactive" && (
           <>
-            <div
-              className={
-                activeVersion
-                  ? "replica-status replica-incomplete"
-                  : "replica-status replica-warning"
-              }
-            >
+            <div className="replica-status replica-people-live">
               <strong>
-                {activeVersion
-                  ? activeVersion.nodeCount
-                    ? `${activeVersion.nodeCount} nodes and ${activeVersion.edgeCount} relationships captured`
-                    : "Original stored · node-by-node replica still pending"
-                  : "Working reconstruction only · no original source attached"}
+                {peopleNodes.length} named owners ·{" "}
+                {confirmedRelationshipCount} confirmed ownership or reporting
+                links
               </strong>
               <span>
                 {activeVersion
-                  ? "The canvas below remains provisional until every node, line style and original coordinate is captured."
-                  : "Do not treat this canvas as a faithful reproduction of the BD Scholar diagram."}
+                  ? "Current people data is shown below; the exact BD Scholar layout remains a separate transcription task."
+                  : "Current official sources are mapped below. The missing original BD Scholar image is still clearly marked in layer 01."}
               </span>
             </div>
-            <section className="structure-canvas">
+            <section className="structure-canvas people-structure-canvas">
               <div className="canvas-grid" aria-hidden="true" />
               <div
-                className="org-chart"
+                className="people-org-chart"
                 style={{ transform: `scale(${zoom / 100})` }}
               >
-                <button
-                  className={`org-node org-top ${selectedNode.id === structureNodes[0].id ? "is-selected" : ""}`}
-                  onClick={() => setSelectedNode(structureNodes[0])}
-                >
-                  <span className="node-kicker">Enterprise</span>
-                  <strong>{structureNodes[0].role}</strong>
-                  <small>{structureNodes[0].scope}</small>
-                  <EvidenceBadge level={structureNodes[0].level} />
-                </button>
-                <span className="connector connector-vertical top-connector" />
-                <button
-                  className={`org-node org-core ${selectedNode.id === structureNodes[1].id ? "is-selected" : ""}`}
-                  onClick={() => setSelectedNode(structureNodes[1])}
-                >
-                  <span className="node-kicker">Global function</span>
-                  <strong>{structureNodes[1].role}</strong>
-                  <small>{structureNodes[1].scope}</small>
-                  <EvidenceBadge level={structureNodes[1].level} />
-                </button>
-                <span className="connector connector-vertical core-connector" />
-                <span className="connector connector-horizontal branch-connector" />
-                <div className="org-branches">
-                  {structureNodes.slice(2).map((node) => (
-                    <div className="branch-wrap" key={node.id}>
-                      <span
-                        className={`connector connector-vertical branch-line ${node.level === "C" ? "is-dashed" : ""}`}
-                      />
-                      <button
-                        className={`org-node org-branch ${selectedNode.id === node.id ? "is-selected" : ""} ${node.level === "C" ? "is-hypothesis" : ""}`}
-                        onClick={() => setSelectedNode(node)}
-                      >
-                        <span className="node-kicker">
-                          {node.id === "se"
-                            ? "Scientific ownership"
-                            : "Partnering function"}
-                        </span>
-                        <strong>{node.role}</strong>
-                        <small>{node.scope}</small>
-                        <EvidenceBadge level={node.level} />
-                      </button>
-                      {node.id === "se" && (
-                        <div className="person-stack">
-                          <span className="mini-person">Therapy lead</span>
-                          <span className="mini-person">Modality lead</span>
+                <div className="people-map-intro">
+                  <div>
+                    <span className="eyebrow">Current people map</span>
+                    <h2>{company.name} decision structure</h2>
+                  </div>
+                  <div>
+                    <span>Verified</span>
+                    <strong>{peopleStructure?.asOf ?? company.verifiedAt}</strong>
+                  </div>
+                  <a
+                    href={peopleStructure?.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Primary team source ↗
+                  </a>
+                </div>
+                <p className="people-map-summary">
+                  {peopleStructure?.summary ??
+                    "No named structure has been recovered for this company yet."}
+                </p>
+                <div className="people-function-groups">
+                  {peopleGroups.map((group) => {
+                    const groupNodes = peopleNodes.filter(
+                      (node) => node.group === group,
+                    );
+                    return (
+                      <section className="people-function-group" key={group}>
+                        <div className="people-group-heading">
+                          <span>{group}</span>
+                          <strong>{groupNodes.length}</strong>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                        <div className="people-node-grid">
+                          {groupNodes.map((node) => {
+                            const parent = node.parentId
+                              ? peopleNodes.find(
+                                  (candidate) => candidate.id === node.parentId,
+                                )
+                              : undefined;
+                            return (
+                              <button
+                                className={`people-node ${selectedPeopleNode?.id === node.id ? "is-selected" : ""}`}
+                                key={node.id}
+                                onClick={() => setSelectedPeopleNodeId(node.id)}
+                              >
+                                <span
+                                  className={
+                                    node.relationshipConfirmed
+                                      ? "people-relation-line"
+                                      : "people-relation-line is-dashed"
+                                  }
+                                  aria-hidden="true"
+                                />
+                                <span className="people-node-topline">
+                                  <span>{node.location ?? "Global"}</span>
+                                  <EvidenceBadge level={node.evidence} />
+                                </span>
+                                <strong>{node.name}</strong>
+                                <small>{node.role}</small>
+                                <span className="people-node-relation">
+                                  {parent
+                                    ? `${node.relationship} · ${parent.name}`
+                                    : node.relationship}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    );
+                  })}
                 </div>
               </div>
               <div className="canvas-caption">
-                <span className="solid-line" /> Confirmed reporting relationship
-                <span className="dashed-line" /> Working hypothesis
+                <span className="solid-line" /> Confirmed role, ownership or
+                reporting line
+                <span className="dashed-line" /> Same team or functional
+                relationship; direct report not stated
               </div>
             </section>
           </>
@@ -1399,57 +1444,56 @@ function StructureView({
                 </p>
               </article>
               <article
-                className={
-                  activeVersion?.nodeCount ? "is-complete" : "is-incomplete"
-                }
+                className={peopleNodes.length ? "is-complete" : "is-incomplete"}
               >
-                <span>02 · Interactive replica</span>
+                <span>02 · Named people structure</span>
                 <strong>
-                  {activeVersion?.nodeCount
-                    ? `${activeVersion.nodeCount} nodes captured`
-                    : "Replica capture pending"}
+                  {peopleNodes.length
+                    ? `${peopleNodes.length} people and owners mapped`
+                    : "People capture pending"}
                 </strong>
                 <p>
-                  Original positions, line styles, arrows and reporting
-                  relationships must be transcribed without auto-layout.
+                  Solid relationships are explicitly supported. Team membership
+                  without a published direct report remains dashed.
                 </p>
               </article>
-              <article
-                className={activeVersion?.verifiedAt ? "is-complete" : "is-incomplete"}
-              >
+              <article className={peopleNodes.length ? "is-complete" : "is-incomplete"}>
                 <span>03 · Current validation</span>
                 <strong>
-                  {activeVersion?.verifiedAt
-                    ? `Verified ${formatRecordDate(activeVersion.verifiedAt)}`
+                  {peopleStructure
+                    ? `Reviewed ${peopleStructure.asOf}`
                     : "Current-state review pending"}
                 </strong>
                 <p>
-                  People and reporting lines need official confirmation before
-                  they are marked current.
+                  Each person carries a role source, evidence grade and
+                  relationship qualification.
                 </p>
               </article>
             </div>
             <div className="validation-table">
               <div className="validation-table-head">
-                <span>Function</span>
-                <span>Article structure</span>
+                <span>Person / function</span>
+                <span>Relationship</span>
                 <span>Current status</span>
                 <span>Evidence</span>
               </div>
-              {structureNodes.map((node) => (
+              {peopleNodes.map((node) => (
                 <div className="validation-row" key={node.id}>
-                  <strong>{node.role}</strong>
-                  <span>{node.scope}</span>
+                  <strong>
+                    {node.name}
+                    <small>{node.role}</small>
+                  </strong>
+                  <span>{node.relationship}</span>
                   <span
                     className={
-                      node.level === "C"
+                      !node.relationshipConfirmed
                         ? "validation-status is-unverified"
                         : "validation-status"
                     }
                   >
                     {node.status}
                   </span>
-                  <EvidenceBadge level={node.level} />
+                  <EvidenceBadge level={node.evidence} />
                 </div>
               ))}
             </div>
@@ -1507,44 +1551,67 @@ function StructureView({
         {mode === "interactive" && (
           <>
             <div className="drawer-heading">
-              <span className="eyebrow">Selected function</span>
-              <EvidenceBadge level={selectedNode.level} />
+              <span className="eyebrow">Selected person</span>
+              {selectedPeopleNode && (
+                <EvidenceBadge level={selectedPeopleNode.evidence} />
+              )}
             </div>
-            <h2>{selectedNode.role}</h2>
-            <p>{selectedNode.scope}</p>
-            <div className="drawer-section">
-              <span>Role in the deal</span>
-              <strong>
-                {selectedNode.id === "se"
-                  ? "Builds the internal scientific case and finds the right champion."
-                  : selectedNode.id === "transactions"
-                    ? "Turns sponsored interest into executable deal structure."
-                    : "Connects this step to the broader partnering decision."}
-              </strong>
-            </div>
-            <div className="drawer-section">
-              <span>Evidence status</span>
-              <div className="drawer-evidence">
-                <EvidenceBadge level={selectedNode.level} />
-                <div>
-                  <strong>{selectedNode.status}</strong>
-                  <small>Reviewed {company.verifiedAt}</small>
+            {selectedPeopleNode ? (
+              <>
+                <h2>{selectedPeopleNode.name}</h2>
+                <p>{selectedPeopleNode.role}</p>
+                <div className="drawer-section">
+                  <span>Position in the structure</span>
+                  <strong>{selectedPeopleNode.relationship}</strong>
+                  <small>
+                    {selectedParent
+                      ? `${selectedPeopleNode.relationshipConfirmed ? "Confirmed connection to" : "Grouped with"} ${selectedParent.name}`
+                      : `Top-level owner in ${selectedPeopleNode.group}`}
+                  </small>
                 </div>
+                <div className="drawer-section">
+                  <span>Role in a deal</span>
+                  <strong>{selectedPeopleNode.dealRole}</strong>
+                </div>
+                <div className="drawer-section">
+                  <span>Evidence status</span>
+                  <div className="drawer-evidence">
+                    <EvidenceBadge level={selectedPeopleNode.evidence} />
+                    <div>
+                      <strong>{selectedPeopleNode.status}</strong>
+                      <small>
+                        Reviewed{" "}
+                        {peopleStructure?.asOf ?? company.verifiedAt}
+                      </small>
+                    </div>
+                  </div>
+                </div>
+                <div className="drawer-section">
+                  <span>Source</span>
+                  <strong>{selectedPeopleNode.sourceTitle}</strong>
+                  <a
+                    className="drawer-source-link"
+                    href={selectedPeopleNode.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open source ↗
+                  </a>
+                </div>
+                <div className="drawer-section">
+                  <span>Eric&apos;s action</span>
+                  <strong>{company.nextAction}</strong>
+                  <small>
+                    Owner · {company.owner} · Due {company.nextActionDate}
+                  </small>
+                </div>
+              </>
+            ) : (
+              <div className="version-empty">
+                <strong>No named structure recovered</strong>
+                <p>Add a verified person and source before drawing a line.</p>
               </div>
-            </div>
-            <div className="drawer-section">
-              <span>Known people</span>
-              <div className="empty-people">
-                <div className="empty-person-mark">＋</div>
-                <p>No verified person attached yet.</p>
-                <button>Add a person</button>
-              </div>
-            </div>
-            <div className="drawer-section">
-              <span>Eric&apos;s action</span>
-              <strong>{company.nextAction}</strong>
-              <small>Owner · {company.owner} · Due {company.nextActionDate}</small>
-            </div>
+            )}
           </>
         )}
 
