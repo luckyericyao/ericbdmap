@@ -12,14 +12,20 @@ import {
 
 type View = "map" | "company" | "structure" | "engagement";
 
-type LocalRecord = {
+type IntelligenceRecord = {
   id: string;
   companyId: string;
   type: "Intelligence" | "Contact" | "Action";
+  title: string;
   note: string;
   evidence: EvidenceLevel;
+  source: "Official" | "BD Scholar" | "Eric note";
+  sourceUrl?: string | null;
   createdAt: string;
+  updatedAt?: string;
 };
+
+type SyncStatus = "connecting" | "live" | "saving" | "local" | "error";
 
 const navItems: { id: View; label: string; hint: string }[] = [
   { id: "map", label: "Global map", hint: "Portfolio" },
@@ -34,6 +40,54 @@ const statusRank = {
   Targeting: 2,
   Research: 1,
 };
+
+const syncLabels: Record<SyncStatus, string> = {
+  connecting: "Connecting",
+  live: "Shared workspace",
+  saving: "Saving",
+  local: "Device draft mode",
+  error: "Sync unavailable",
+};
+
+function readLocalRecords(): IntelligenceRecord[] {
+  const saved = window.localStorage.getItem("eric-bd-map-records");
+  if (!saved) return [];
+
+  try {
+    const parsed = JSON.parse(saved) as Partial<IntelligenceRecord>[];
+    return parsed
+      .filter((record) => record.id && record.companyId && record.note)
+      .map((record) => ({
+        id: String(record.id),
+        companyId: String(record.companyId),
+        type: record.type ?? "Intelligence",
+        title: record.title ?? record.type ?? "Intelligence note",
+        note: String(record.note),
+        evidence: record.evidence ?? "C",
+        source: record.source ?? "Eric note",
+        sourceUrl: record.sourceUrl ?? null,
+        createdAt: record.createdAt ?? new Date().toISOString(),
+        updatedAt: record.updatedAt,
+      }));
+  } catch {
+    window.localStorage.removeItem("eric-bd-map-records");
+    return [];
+  }
+}
+
+function writeLocalRecords(records: IntelligenceRecord[]) {
+  window.localStorage.setItem("eric-bd-map-records", JSON.stringify(records));
+}
+
+function formatRecordDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
 
 function EvidenceBadge({ level }: { level: EvidenceLevel }) {
   return (
@@ -70,21 +124,36 @@ export default function BDMapApp() {
   const [selectedNode, setSelectedNode] = useState(structureNodes[1]);
   const [zoom, setZoom] = useState(100);
   const [isAdding, setIsAdding] = useState(false);
-  const [records, setRecords] = useState<LocalRecord[]>([]);
+  const [editingRecord, setEditingRecord] =
+    useState<IntelligenceRecord | null>(null);
+  const [records, setRecords] = useState<IntelligenceRecord[]>([]);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("connecting");
   const [notice, setNotice] = useState("");
 
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const saved = window.localStorage.getItem("eric-bd-map-records");
-      if (saved) {
-        try {
-          setRecords(JSON.parse(saved));
-        } catch {
-          window.localStorage.removeItem("eric-bd-map-records");
+    let cancelled = false;
+
+    fetch("/api/intelligence", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Shared workspace unavailable");
+        return (await response.json()) as { records: IntelligenceRecord[] };
+      })
+      .then((payload) => {
+        if (!cancelled) {
+          setRecords(payload.records);
+          setSyncStatus("live");
         }
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecords(readLocalRecords());
+          setSyncStatus("local");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const selectedCompany =
@@ -142,7 +211,7 @@ export default function BDMapApp() {
   const companyOpportunities = opportunities.filter(
     (opportunity) => opportunity.companyId === selectedCompany.id,
   );
-  const localCompanyRecords = records.filter(
+  const companyRecords = records.filter(
     (record) => record.companyId === selectedCompany.id,
   );
 
@@ -151,33 +220,112 @@ export default function BDMapApp() {
     setView(targetView);
   }
 
-  function saveRecord(event: FormEvent<HTMLFormElement>) {
+  function openAddRecord() {
+    setEditingRecord(null);
+    setIsAdding(true);
+  }
+
+  function openEditRecord(record: IntelligenceRecord) {
+    setEditingRecord(record);
+    setIsAdding(true);
+  }
+
+  async function saveRecord(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const title = String(form.get("title") ?? "").trim();
     const note = String(form.get("note") ?? "").trim();
-    if (!note) return;
+    if (!title || !note) return;
 
-    const newRecord: LocalRecord = {
-      id: `record-${Date.now()}`,
+    const payload = {
+      id: editingRecord?.id,
       companyId: String(form.get("companyId")),
-      type: String(form.get("type")) as LocalRecord["type"],
+      type: String(form.get("type")) as IntelligenceRecord["type"],
+      title,
       note,
       evidence: String(form.get("evidence")) as EvidenceLevel,
-      createdAt: new Intl.DateTimeFormat("en", {
-        day: "2-digit",
-        month: "short",
-        year: "numeric",
-      }).format(new Date()),
+      source: String(form.get("source")) as IntelligenceRecord["source"],
+      sourceUrl: String(form.get("sourceUrl") ?? "").trim() || null,
     };
-    const nextRecords = [newRecord, ...records];
-    setRecords(nextRecords);
-    window.localStorage.setItem(
-      "eric-bd-map-records",
-      JSON.stringify(nextRecords),
-    );
-    setSelectedCompanyId(newRecord.companyId);
+
+    setSyncStatus("saving");
+
+    try {
+      const response = await fetch("/api/intelligence", {
+        method: editingRecord ? "PATCH" : "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error("Unable to save shared record");
+      const result = (await response.json()) as {
+        record: IntelligenceRecord;
+      };
+      const savedRecord = editingRecord
+        ? { ...editingRecord, ...result.record }
+        : result.record;
+      setRecords((current) =>
+        editingRecord
+          ? current.map((record) =>
+              record.id === savedRecord.id ? savedRecord : record,
+            )
+          : [savedRecord, ...current],
+      );
+      setSyncStatus("live");
+      setNotice(editingRecord ? "Shared record updated" : "Shared record saved");
+    } catch {
+      const fallbackRecord: IntelligenceRecord = {
+        ...payload,
+        id: editingRecord?.id ?? `record-${Date.now()}`,
+        createdAt: editingRecord?.createdAt ?? new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      const nextRecords = editingRecord
+        ? records.map((record) =>
+            record.id === fallbackRecord.id ? fallbackRecord : record,
+          )
+        : [fallbackRecord, ...records];
+      setRecords(nextRecords);
+      writeLocalRecords(nextRecords);
+      setSyncStatus("local");
+      setNotice("Saved as a temporary device draft");
+    }
+
+    setSelectedCompanyId(payload.companyId);
+    setEditingRecord(null);
     setIsAdding(false);
-    setNotice("Record saved to this device");
+    window.setTimeout(() => setNotice(""), 2800);
+  }
+
+  async function deleteRecord(record: IntelligenceRecord) {
+    if (!window.confirm(`Delete “${record.title}”? This cannot be undone.`)) {
+      return;
+    }
+
+    if (syncStatus === "local") {
+      const nextRecords = records.filter((item) => item.id !== record.id);
+      setRecords(nextRecords);
+      writeLocalRecords(nextRecords);
+      setNotice("Device draft deleted");
+      window.setTimeout(() => setNotice(""), 2800);
+      return;
+    }
+
+    setSyncStatus("saving");
+    try {
+      const response = await fetch(
+        `/api/intelligence?id=${encodeURIComponent(record.id)}`,
+        { method: "DELETE" },
+      );
+      if (!response.ok) throw new Error("Unable to delete record");
+      setRecords((current) =>
+        current.filter((item) => item.id !== record.id),
+      );
+      setSyncStatus("live");
+      setNotice("Shared record deleted");
+    } catch {
+      setSyncStatus("error");
+      setNotice("Could not delete the shared record");
+    }
     window.setTimeout(() => setNotice(""), 2800);
   }
 
@@ -261,10 +409,11 @@ export default function BDMapApp() {
             />
             <kbd>⌘ K</kbd>
           </label>
-          <button className="topbar-icon" aria-label="Notifications">
-            <span className="notification-dot" />
-          </button>
-          <button className="add-button" onClick={() => setIsAdding(true)}>
+          <span className={`sync-pill sync-${syncStatus}`}>
+            <span aria-hidden="true" />
+            {syncLabels[syncStatus]}
+          </span>
+          <button className="add-button" onClick={openAddRecord}>
             <span>＋</span> Add intelligence
           </button>
         </header>
@@ -286,7 +435,9 @@ export default function BDMapApp() {
             company={selectedCompany}
             notes={companyIntel}
             opportunities={companyOpportunities}
-            records={localCompanyRecords}
+            records={companyRecords}
+            onEditRecord={openEditRecord}
+            onDeleteRecord={deleteRecord}
             goTo={setView}
           />
         )}
@@ -319,18 +470,31 @@ export default function BDMapApp() {
           >
             <div className="modal-heading">
               <div>
-                <span className="eyebrow">Private workspace</span>
-                <h2 id="add-title">Add intelligence</h2>
+                <span className="eyebrow">
+                  {syncStatus === "live" ? "Shared workspace" : "Private workspace"}
+                </span>
+                <h2 id="add-title">
+                  {editingRecord ? "Edit intelligence" : "Add intelligence"}
+                </h2>
               </div>
-              <button onClick={() => setIsAdding(false)} aria-label="Close">
+              <button
+                onClick={() => {
+                  setEditingRecord(null);
+                  setIsAdding(false);
+                }}
+                aria-label="Close"
+              >
                 ×
               </button>
             </div>
-            <form onSubmit={saveRecord}>
+            <form onSubmit={saveRecord} key={editingRecord?.id ?? "new-record"}>
               <div className="form-row">
                 <label>
                   Company
-                  <select name="companyId" defaultValue={selectedCompany.id}>
+                  <select
+                    name="companyId"
+                    defaultValue={editingRecord?.companyId ?? selectedCompany.id}
+                  >
                     {companies.map((company) => (
                       <option key={company.id} value={company.id}>
                         {company.name}
@@ -340,7 +504,10 @@ export default function BDMapApp() {
                 </label>
                 <label>
                   Record type
-                  <select name="type" defaultValue="Intelligence">
+                  <select
+                    name="type"
+                    defaultValue={editingRecord?.type ?? "Intelligence"}
+                  >
                     <option>Intelligence</option>
                     <option>Contact</option>
                     <option>Action</option>
@@ -348,39 +515,89 @@ export default function BDMapApp() {
                 </label>
               </div>
               <label>
-                Note
-                <textarea
-                  name="note"
-                  rows={5}
+                Title
+                <input
+                  name="title"
                   autoFocus
-                  placeholder="What changed, what matters, and what should happen next?"
+                  defaultValue={editingRecord?.title ?? ""}
+                  placeholder="A concise statement of what changed"
+                  maxLength={160}
                   required
                 />
               </label>
               <label>
-                Evidence confidence
-                <select name="evidence" defaultValue="C">
-                  {evidenceLegend.map((item) => (
-                    <option key={item.level} value={item.level}>
-                      {item.level} · {item.label}
-                    </option>
-                  ))}
-                </select>
+                Detail and implication
+                <textarea
+                  name="note"
+                  rows={5}
+                  defaultValue={editingRecord?.note ?? ""}
+                  placeholder="What changed, what matters, and what should happen next?"
+                  maxLength={5000}
+                  required
+                />
+              </label>
+              <div className="form-row">
+                <label>
+                  Evidence confidence
+                  <select
+                    name="evidence"
+                    defaultValue={editingRecord?.evidence ?? "C"}
+                  >
+                    {evidenceLegend.map((item) => (
+                      <option key={item.level} value={item.level}>
+                        {item.level} · {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Source layer
+                  <select
+                    name="source"
+                    defaultValue={editingRecord?.source ?? "Eric note"}
+                  >
+                    <option>Official</option>
+                    <option>BD Scholar</option>
+                    <option>Eric note</option>
+                  </select>
+                </label>
+              </div>
+              <label>
+                Source URL · Optional
+                <input
+                  name="sourceUrl"
+                  type="url"
+                  defaultValue={editingRecord?.sourceUrl ?? ""}
+                  placeholder="https://company.com/partnering/..."
+                  maxLength={2000}
+                />
               </label>
               <div className="modal-note">
-                Saved as a private device draft in this first version. Shared,
-                durable records will be connected to the backend next.
+                {syncStatus === "live"
+                  ? "This record will be available across your signed-in devices. Evidence and source layers remain visible in the company workspace."
+                  : "The shared workspace is not connected right now. Saving will create a temporary draft on this device so the intelligence is not lost."}
               </div>
               <div className="modal-actions">
                 <button
                   type="button"
                   className="secondary-button"
-                  onClick={() => setIsAdding(false)}
+                  onClick={() => {
+                    setEditingRecord(null);
+                    setIsAdding(false);
+                  }}
                 >
                   Cancel
                 </button>
-                <button type="submit" className="primary-button">
-                  Save record
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={syncStatus === "saving"}
+                >
+                  {syncStatus === "saving"
+                    ? "Saving…"
+                    : editingRecord
+                      ? "Update record"
+                      : "Save record"}
                 </button>
               </div>
             </form>
@@ -554,12 +771,16 @@ function CompanyView({
   notes,
   opportunities: companyOpportunities,
   records,
+  onEditRecord,
+  onDeleteRecord,
   goTo,
 }: {
   company: (typeof companies)[number];
   notes: typeof intelNotes;
   opportunities: typeof opportunities;
-  records: LocalRecord[];
+  records: IntelligenceRecord[];
+  onEditRecord: (record: IntelligenceRecord) => void;
+  onDeleteRecord: (record: IntelligenceRecord) => void;
   goTo: (view: View) => void;
 }) {
   return (
@@ -652,12 +873,40 @@ function CompanyView({
             {records.map((record) => (
               <article className="intel-card is-private" key={record.id}>
                 <div className="intel-card-line">
-                  <span className="source-tag source-eric-note">Private draft</span>
-                  <span>{record.createdAt}</span>
+                  <span
+                    className={`source-tag source-${record.source.toLowerCase().replace(" ", "-")}`}
+                  >
+                    {record.source}
+                  </span>
+                  <span>{formatRecordDate(record.updatedAt ?? record.createdAt)}</span>
                   <EvidenceBadge level={record.evidence} />
                 </div>
-                <h3>{record.type}</h3>
+                <div className="intel-card-heading">
+                  <div>
+                    <span>{record.type}</span>
+                    <h3>{record.title}</h3>
+                  </div>
+                  <div className="record-actions">
+                    <button onClick={() => onEditRecord(record)}>Edit</button>
+                    <button
+                      className="delete-record"
+                      onClick={() => onDeleteRecord(record)}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
                 <p>{record.note}</p>
+                {record.sourceUrl && (
+                  <a
+                    className="record-source-link"
+                    href={record.sourceUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open source ↗
+                  </a>
+                )}
               </article>
             ))}
           </div>

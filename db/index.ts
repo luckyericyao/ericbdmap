@@ -11,3 +11,13 @@ export function getDb() {
 
   return drizzle(env.DB, { schema });
 }
+
+export function getD1() {
+  if (!env.DB) {
+    throw new Error(
+      "Cloudflare D1 binding `DB` is unavailable. Configure the DB binding before using shared intelligence records.",
+    );
+  }
+
+  return env.DB;
+}

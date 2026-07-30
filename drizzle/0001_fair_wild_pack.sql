@@ -1,0 +1,1 @@
+ALTER TABLE `intelligence_records` ADD `source_url` text;

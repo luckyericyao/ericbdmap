@@ -13,8 +13,10 @@ the next action that advances a deal.
 - **Structure** — inspect the path from enterprise strategy through Search &
   Evaluation, Transactions, Alliance Management, and regional partnering.
 - **Engagement** — track opportunities by stage, owner, deadline, and next move.
-- **Private draft capture** — add intelligence, contacts, and actions locally in
-  the browser while the shared backend is being prepared.
+- **Shared intelligence records** — add, edit, and delete intelligence,
+  contacts, and actions across signed-in devices.
+- **Resilient draft capture** — fall back to a temporary browser draft when the
+  shared database is unavailable.
 
 The eight seeded company profiles are product-shaping data reconstructed from
 the initial research brief. Evidence labels are intentionally visible:
@@ -46,13 +48,17 @@ pnpm lint
 pnpm build
 ```
 
-## Next data milestone
+## Data architecture
 
-The current add-intelligence form stores private drafts in browser local
-storage. The next product milestone is a shared authenticated backend with:
+User-created intelligence records are stored in Cloudflare D1 through
+`/api/intelligence`. The production site is owner-only, while the record schema
+keeps source and evidence confidence explicit. Browser storage is only used as
+a temporary fallback when the shared workspace cannot be reached.
+
+The next product milestone expands the shared data model to:
 
 1. companies, teams, people, and reporting relationships;
-2. evidence sources and verification history;
+2. source URLs and a full verification history;
 3. opportunities, interactions, next actions, and internal owners;
-4. role-based access for private relationship notes;
+4. role-level access for private relationship notes;
 5. import tooling for the BD Scholar tracker workbook.
