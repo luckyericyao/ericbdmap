@@ -2038,7 +2038,7 @@ textarea:focus-visible {
   border: 1px solid var(--line);
   border-radius: 7px;
   display: block;
-  min-height: 115px;
+  min-height: 164px;
   overflow: hidden;
   padding: 11px 13px 11px 17px;
   position: relative;
@@ -2082,6 +2082,56 @@ textarea:focus-visible {
   text-transform: uppercase;
 }
 
+.people-node-identity {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 46px minmax(0, 1fr);
+}
+
+.people-node-copy {
+  min-width: 0;
+}
+
+.person-avatar {
+  align-items: center;
+  background:
+    linear-gradient(145deg, rgba(128, 215, 197, 0.3), rgba(88, 140, 189, 0.16)),
+    var(--paper);
+  border: 1px solid rgba(17, 27, 38, 0.13);
+  border-radius: 50%;
+  color: var(--ink-soft);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font: 700 10px var(--font-ui);
+  height: 46px;
+  justify-content: center;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  position: relative;
+  width: 46px;
+}
+
+.person-avatar.has-photo {
+  background: var(--paper-deep);
+  box-shadow:
+    0 0 0 3px var(--white),
+    0 0 0 4px rgba(43, 143, 124, 0.22);
+}
+
+.person-avatar img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.person-avatar.is-large {
+  font-size: 17px;
+  height: 82px;
+  width: 82px;
+}
+
 .people-node strong,
 .people-node small,
 .people-node-relation {
@@ -2105,8 +2155,36 @@ textarea:focus-visible {
   color: var(--ink-muted);
   font-size: 6px;
   line-height: 1.35;
-  margin-top: 9px;
+  margin-top: 11px;
   padding-top: 7px;
+}
+
+.linkedin-state {
+  align-items: center;
+  color: var(--mint-deep);
+  display: inline-flex;
+  font-size: 6px;
+  font-weight: 800;
+  gap: 5px;
+  letter-spacing: 0.055em;
+  margin-top: 8px;
+  text-transform: uppercase;
+}
+
+.linkedin-state::before {
+  background: var(--mint-deep);
+  border-radius: 50%;
+  content: "";
+  height: 5px;
+  width: 5px;
+}
+
+.linkedin-state.is-missing {
+  color: #916731;
+}
+
+.linkedin-state.is-missing::before {
+  background: #c09c4e;
 }
 
 .validation-summary-grid {
@@ -2217,6 +2295,19 @@ textarea:focus-visible {
 
 .validation-row > span {
   color: var(--ink-muted);
+}
+
+.validation-person {
+  align-items: center;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 34px minmax(0, 1fr);
+}
+
+.validation-person .person-avatar {
+  font-size: 7px;
+  height: 34px;
+  width: 34px;
 }
 
 .validation-status {
@@ -2515,6 +2606,53 @@ textarea:focus-visible {
   background: var(--white);
   border-left: 1px solid var(--line);
   padding: 31px 23px;
+}
+
+.drawer-person-identity {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  margin: 22px 0 12px;
+}
+
+.drawer-person-identity h2 {
+  font: 28px/1.03 Georgia, serif;
+  letter-spacing: -0.04em;
+  margin: 0 0 7px;
+}
+
+.drawer-person-identity p {
+  color: var(--ink-muted);
+  font-size: 9px;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.drawer-linkedin-state {
+  align-items: center;
+  background: rgba(128, 215, 197, 0.08);
+  border: 1px solid rgba(43, 143, 124, 0.15);
+  border-radius: 7px;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  padding: 10px 11px;
+}
+
+.drawer-linkedin-state .linkedin-state {
+  margin-top: 0;
+}
+
+.drawer-linkedin-state a {
+  color: var(--mint-deep);
+  font-size: 7px;
+  font-weight: 800;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.drawer-linkedin-state a:hover {
+  text-decoration: underline;
 }
 
 .drawer-heading {
@@ -3095,6 +3233,8 @@ textarea:focus-visible {
   }
 
   .drawer-heading,
+  .drawer-person-identity,
+  .drawer-linkedin-state,
   .node-drawer > h2,
   .node-drawer > p {
     grid-column: 1 / -1;

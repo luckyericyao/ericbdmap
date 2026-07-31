@@ -8,6 +8,7 @@ import {
   opportunities,
   type EvidenceLevel,
 } from "./bd-data";
+import { peopleProfiles, type PeopleProfile } from "./people-profiles";
 import { companyPeopleStructures } from "./structure-data";
 
 type View = "map" | "company" | "structure" | "engagement";
@@ -114,6 +115,44 @@ function EvidenceBadge({ level }: { level: EvidenceLevel }) {
   return (
     <span className={`evidence-badge evidence-${level.toLowerCase()}`}>
       {level}
+    </span>
+  );
+}
+
+function personInitials(name: string) {
+  return name
+    .replace(/\([^)]*\)/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function PersonAvatar({
+  name,
+  profile,
+  large = false,
+}: {
+  name: string;
+  profile?: PeopleProfile;
+  large?: boolean;
+}) {
+  return (
+    <span
+      className={`person-avatar${large ? " is-large" : ""}${profile?.avatarUrl ? " has-photo" : ""}`}
+      aria-hidden={!profile?.avatarUrl}
+    >
+      {profile?.avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={profile.avatarUrl}
+          alt={`${name} LinkedIn profile portrait`}
+        />
+      ) : (
+        personInitials(name)
+      )}
     </span>
   );
 }
@@ -1040,6 +1079,12 @@ function StructureView({
   const confirmedRelationshipCount = peopleNodes.filter(
     (node) => node.relationshipConfirmed,
   ).length;
+  const verifiedPortraitCount = peopleNodes.filter(
+    (node) => peopleProfiles[node.id]?.avatarUrl,
+  ).length;
+  const selectedPeopleProfile = selectedPeopleNode
+    ? peopleProfiles[selectedPeopleNode.id]
+    : undefined;
 
   useEffect(() => {
     let cancelled = false;
@@ -1335,9 +1380,11 @@ function StructureView({
                 links
               </strong>
               <span>
+                {verifiedPortraitCount} LinkedIn identities with verified
+                portraits ·{" "}
                 {activeVersion
-                  ? "Current people data is shown below; the exact BD Scholar layout remains a separate transcription task."
-                  : "Current official sources are mapped below. The missing original BD Scholar image is still clearly marked in layer 01."}
+                  ? "the original BD Scholar layout remains preserved separately."
+                  : "the missing original BD Scholar image remains clearly marked in layer 01."}
               </span>
             </div>
             <section className="structure-canvas people-structure-canvas">
@@ -1385,6 +1432,7 @@ function StructureView({
                                   (candidate) => candidate.id === node.parentId,
                                 )
                               : undefined;
+                            const profile = peopleProfiles[node.id];
                             return (
                               <button
                                 className={`people-node ${selectedPeopleNode?.id === node.id ? "is-selected" : ""}`}
@@ -1403,12 +1451,27 @@ function StructureView({
                                   <span>{node.location ?? "Global"}</span>
                                   <EvidenceBadge level={node.evidence} />
                                 </span>
-                                <strong>{node.name}</strong>
-                                <small>{node.role}</small>
+                                <span className="people-node-identity">
+                                  <PersonAvatar
+                                    name={node.name}
+                                    profile={profile}
+                                  />
+                                  <span className="people-node-copy">
+                                    <strong>{node.name}</strong>
+                                    <small>{node.role}</small>
+                                  </span>
+                                </span>
                                 <span className="people-node-relation">
                                   {parent
                                     ? `${node.relationship} · ${parent.name}`
                                     : node.relationship}
+                                </span>
+                                <span
+                                  className={`linkedin-state${profile?.avatarUrl ? "" : " is-missing"}`}
+                                >
+                                  {profile?.avatarUrl
+                                    ? "LinkedIn verified"
+                                    : "Profile not confirmed"}
                                 </span>
                               </button>
                             );
@@ -1479,10 +1542,16 @@ function StructureView({
               </div>
               {peopleNodes.map((node) => (
                 <div className="validation-row" key={node.id}>
-                  <strong>
-                    {node.name}
-                    <small>{node.role}</small>
-                  </strong>
+                  <span className="validation-person">
+                    <PersonAvatar
+                      name={node.name}
+                      profile={peopleProfiles[node.id]}
+                    />
+                    <strong>
+                      {node.name}
+                      <small>{node.role}</small>
+                    </strong>
+                  </span>
                   <span>{node.relationship}</span>
                   <span
                     className={
@@ -1558,8 +1627,38 @@ function StructureView({
             </div>
             {selectedPeopleNode ? (
               <>
-                <h2>{selectedPeopleNode.name}</h2>
-                <p>{selectedPeopleNode.role}</p>
+                <div className="drawer-person-identity">
+                  <PersonAvatar
+                    name={selectedPeopleNode.name}
+                    profile={selectedPeopleProfile}
+                    large
+                  />
+                  <div>
+                    <h2>{selectedPeopleNode.name}</h2>
+                    <p>{selectedPeopleNode.role}</p>
+                  </div>
+                </div>
+                <div className="drawer-linkedin-state">
+                  <span
+                    className={
+                      selectedPeopleProfile?.avatarUrl
+                        ? "linkedin-state"
+                        : "linkedin-state is-missing"
+                    }
+                  >
+                    {selectedPeopleProfile?.verificationStatus ??
+                      "No confirmed LinkedIn profile"}
+                  </span>
+                  {selectedPeopleProfile?.linkedinUrl && (
+                    <a
+                      href={selectedPeopleProfile.linkedinUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open LinkedIn ↗
+                    </a>
+                  )}
+                </div>
                 <div className="drawer-section">
                   <span>Position in the structure</span>
                   <strong>{selectedPeopleNode.relationship}</strong>
