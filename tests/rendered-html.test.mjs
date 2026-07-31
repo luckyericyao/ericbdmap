@@ -30,10 +30,11 @@ test("server-renders Eric's BD Map product surface", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Eric&#x27;s BD Map \| Partnering Intelligence<\/title>/i);
-  assert.match(html, /See the whole board\./);
+  assert.match(html, /Every path starts/);
+  assert.match(html, /The Best BD in China/);
   assert.match(html, /Global map/);
   assert.match(html, /Named people<\/span><strong>76/);
-  assert.match(html, /8 companies · sourced roles/);
+  assert.match(html, /10 companies · sourced roles/);
   assert.doesNotMatch(html, /codex-preview|Building your site|loading skeleton/i);
 });
 

@@ -48,6 +48,20 @@ type StructureVersionRecord = {
 };
 
 type StructureMode = "original" | "interactive" | "validation";
+type MapDepth = "Companies" | "Functions" | "People";
+
+type NetworkPosition = {
+  x: number;
+  y: number;
+};
+
+type MapBranchNode = {
+  id: string;
+  name: string;
+  role: string;
+  profile?: PeopleProfile;
+  isPlaceholder?: boolean;
+};
 
 const navItems: { id: View; label: string; hint: string }[] = [
   { id: "map", label: "Global map", hint: "Portfolio" },
@@ -70,6 +84,114 @@ const syncLabels: Record<SyncStatus, string> = {
   local: "Device draft mode",
   error: "Sync unavailable",
 };
+
+const networkCenter: NetworkPosition = { x: 550, y: 360 };
+
+function networkPositions(count: number): NetworkPosition[] {
+  if (!count) return [];
+
+  return Array.from({ length: count }, (_, index) => {
+    const angle = -Math.PI / 2 + (index * Math.PI * 2) / count;
+    return {
+      x: networkCenter.x + Math.cos(angle) * 425,
+      y: networkCenter.y + Math.sin(angle) * 278,
+    };
+  });
+}
+
+function connectorStyle(
+  from: NetworkPosition,
+  to: NetworkPosition,
+): React.CSSProperties {
+  const deltaX = to.x - from.x;
+  const deltaY = to.y - from.y;
+  const length = Math.sqrt(deltaX ** 2 + deltaY ** 2);
+  const angle = Math.atan2(deltaY, deltaX) * (180 / Math.PI);
+
+  return {
+    left: from.x,
+    top: from.y,
+    width: length,
+    transform: `rotate(${angle}deg)`,
+  };
+}
+
+function branchPositions(
+  companyPosition: NetworkPosition,
+  count: number,
+): NetworkPosition[] {
+  if (!count) return [];
+
+  const deltaX = networkCenter.x - companyPosition.x;
+  const deltaY = networkCenter.y - companyPosition.y;
+  const length = Math.sqrt(deltaX ** 2 + deltaY ** 2) || 1;
+  const inwardX = deltaX / length;
+  const inwardY = deltaY / length;
+  const tangentX = -inwardY;
+  const tangentY = inwardX;
+  const base = {
+    x: companyPosition.x + inwardX * 118,
+    y: companyPosition.y + inwardY * 118,
+  };
+  const spread =
+    count === 1
+      ? [0]
+      : count === 2
+        ? [-76, 76]
+        : count === 3
+          ? [-124, 0, 124]
+          : [-150, -50, 50, 150];
+
+  return spread.slice(0, count).map((offset) => ({
+    x: base.x + tangentX * offset,
+    y: base.y + tangentY * offset,
+  }));
+}
+
+function mapBranchNodes(companyId: string, depth: MapDepth): MapBranchNode[] {
+  const structure = companyPeopleStructures[companyId];
+  const fallback = [
+    {
+      id: `${companyId}-search`,
+      name: "Search & Evaluation",
+      role: "Structure capture next",
+      isPlaceholder: true,
+    },
+    {
+      id: `${companyId}-transactions`,
+      name: "Transactions",
+      role: "Structure capture next",
+      isPlaceholder: true,
+    },
+    {
+      id: `${companyId}-alliances`,
+      name: "Alliance Management",
+      role: "Structure capture next",
+      isPlaceholder: true,
+    },
+  ];
+
+  if (depth === "Companies") return [];
+
+  if (depth === "Functions") {
+    if (!structure?.nodes.length) return fallback;
+    return Array.from(new Set(structure.nodes.map((node) => node.group)))
+      .slice(0, 3)
+      .map((group) => ({
+        id: `${companyId}-${group}`,
+        name: group,
+        role: `${structure.nodes.filter((node) => node.group === group).length} mapped owners`,
+      }));
+  }
+
+  if (!structure?.nodes.length) return fallback;
+  return structure.nodes.slice(0, 3).map((node) => ({
+    id: node.id,
+    name: node.name,
+    role: node.role,
+    profile: peopleProfiles[node.id],
+  }));
+}
 
 function readLocalRecords(): IntelligenceRecord[] {
   const saved = window.localStorage.getItem("eric-bd-map-records");
@@ -178,9 +300,7 @@ export default function BDMapApp() {
   const [selectedCompanyId, setSelectedCompanyId] = useState("novartis");
   const [search, setSearch] = useState("");
   const [therapy, setTherapy] = useState("All");
-  const [mapDepth, setMapDepth] = useState<"Companies" | "Functions" | "People">(
-    "Companies",
-  );
+  const [mapDepth, setMapDepth] = useState<MapDepth>("People");
   const [zoom, setZoom] = useState(100);
   const [isAdding, setIsAdding] = useState(false);
   const [editingRecord, setEditingRecord] =
@@ -430,7 +550,7 @@ export default function BDMapApp() {
           <div className="coverage-track">
             <span />
           </div>
-          <p>8 companies · sourced roles and qualified links</p>
+          <p>10 companies · sourced roles and qualified links</p>
           <button onClick={() => setView("map")}>View evidence gaps</button>
         </section>
 
@@ -681,38 +801,63 @@ function MapView({
   therapy: string;
   therapyOptions: string[];
   setTherapy: (value: string) => void;
-  mapDepth: "Companies" | "Functions" | "People";
-  setMapDepth: (value: "Companies" | "Functions" | "People") => void;
+  mapDepth: MapDepth;
+  setMapDepth: (value: MapDepth) => void;
   openCompany: (companyId: string, targetView?: View) => void;
 }) {
+  const [expandedCompanyId, setExpandedCompanyId] = useState("novartis");
   const totalOpportunities = visibleCompanies.reduce(
     (sum, company) => sum + company.opportunities,
     0,
   );
+  const positions = networkPositions(visibleCompanies.length);
+  const activeCompany =
+    visibleCompanies.find((company) => company.id === expandedCompanyId) ??
+    visibleCompanies[0];
+  const activeIndex = activeCompany
+    ? visibleCompanies.findIndex((company) => company.id === activeCompany.id)
+    : -1;
+  const activePosition = activeIndex >= 0 ? positions[activeIndex] : undefined;
+  const activeBranches = activeCompany
+    ? mapBranchNodes(activeCompany.id, mapDepth)
+    : [];
+  const activeBranchPositions = activePosition
+    ? branchPositions(activePosition, activeBranches.length)
+    : [];
+  const mappedPeopleCount = visibleCompanies.reduce(
+    (sum, company) =>
+      sum + (companyPeopleStructures[company.id]?.nodes.length ?? 0),
+    0,
+  );
 
   return (
-    <div className="page-content">
+    <div className="page-content radial-page">
       <section className="page-heading map-heading">
         <div>
-          <span className="eyebrow">Global partnering landscape</span>
-          <h1>See the whole board.<br />Move on the right door.</h1>
+          <span className="eyebrow">Eric-centered relationship intelligence</span>
+          <h1>
+            Every path starts
+            <br />
+            from Eric.
+          </h1>
           <p>
-            One living map of MNC priorities, decision structure, relationship
-            strength and the next action that advances a deal.
+            Ten Big Pharma networks radiate from one relationship owner. Open
+            any company to reveal its BD line, named decision makers and the
+            next door to move.
           </p>
         </div>
         <div className="map-stat-strip">
           <div>
             <strong>{visibleCompanies.length}</strong>
-            <span>MNCs visible</span>
+            <span>Big Pharma networks</span>
+          </div>
+          <div>
+            <strong>{mappedPeopleCount}</strong>
+            <span>Named decision makers</span>
           </div>
           <div>
             <strong>{totalOpportunities}</strong>
             <span>Open routes</span>
-          </div>
-          <div>
-            <strong>3</strong>
-            <span>Need action</span>
           </div>
         </div>
       </section>
@@ -730,7 +875,7 @@ function MapView({
           ))}
         </div>
         <div className="depth-control" aria-label="Map detail level">
-          <span>Map depth</span>
+          <span>Expand map</span>
           {(["Companies", "Functions", "People"] as const).map((depth) => (
             <button
               key={depth}
@@ -743,59 +888,140 @@ function MapView({
         </div>
       </section>
 
-      <section className={`company-map depth-${mapDepth.toLowerCase()}`}>
-        <div className="map-grid" aria-hidden="true" />
-        <div className="map-axis map-axis-y">
-          <span>Strategic fit</span>
-        </div>
-        <div className="map-axis map-axis-x">
-          <span>Relationship strength →</span>
-        </div>
-        <div className="map-region-label region-label-eu">Europe</div>
-        <div className="map-region-label region-label-na">North America</div>
-        <div className="company-card-grid">
-          {visibleCompanies.map((company, index) => (
-            <button
-              key={company.id}
-              className={`company-map-card map-card-${index + 1}`}
-              onClick={() => openCompany(company.id)}
-              style={{ "--fit": company.fit } as React.CSSProperties}
-            >
-              <div className="company-card-top">
-                <CompanyMonogram
-                  initials={company.initials}
-                  accent={company.accent}
+      <section className={`eric-network-map depth-${mapDepth.toLowerCase()}`}>
+        <div className="network-map-scroll">
+          <div className="network-map-stage">
+            <div className="network-grid" aria-hidden="true" />
+            <span className="network-orbit orbit-one" aria-hidden="true" />
+            <span className="network-orbit orbit-two" aria-hidden="true" />
+
+            {visibleCompanies.map((company, index) => (
+              <span
+                className={`network-connector relation-${company.relationship.toLowerCase()}`}
+                style={connectorStyle(networkCenter, positions[index])}
+                key={`${company.id}-connector`}
+                aria-hidden="true"
+              />
+            ))}
+
+            {activePosition &&
+              activeBranches.map((branch, index) => (
+                <span
+                  className="network-connector is-branch"
+                  style={connectorStyle(
+                    activePosition,
+                    activeBranchPositions[index],
+                  )}
+                  key={`${branch.id}-connector`}
+                  aria-hidden="true"
                 />
-                <span className={`relationship-pill relation-${company.relationship.toLowerCase()}`}>
-                  {company.relationship}
-                </span>
-              </div>
-              <strong>{company.shortName}</strong>
-              <small>{company.hq}</small>
-              <div className="company-card-detail">
-                <span>{company.focus[0]}</span>
-                <span>{company.modalities[0]}</span>
-              </div>
-              {mapDepth === "People" && (
-                <div className="company-people">
-                  <span>Named structure</span>
-                  <strong>
-                    {companyPeopleStructures[company.id]?.nodes.length ?? 0}{" "}
-                    people
-                  </strong>
-                  <span>
-                    {companyPeopleStructures[company.id]?.nodes.filter(
-                      (node) => node.relationshipConfirmed,
-                    ).length ?? 0}{" "}
-                    confirmed links
+              ))}
+
+            <div
+              className="eric-center-node"
+              style={{ left: networkCenter.x, top: networkCenter.y }}
+            >
+              <span className="eric-center-avatar">EY</span>
+              <span className="eric-center-kicker">The relationship origin</span>
+              <strong>Eric Yao</strong>
+              <small>The Best BD in China</small>
+              <span className="eric-center-proof">
+                One owner · Ten networks · Every next move
+              </span>
+            </div>
+
+            {visibleCompanies.map((company, index) => {
+              const position = positions[index];
+              const isExpanded = activeCompany?.id === company.id;
+              const structure = companyPeopleStructures[company.id];
+              const portraitNodes =
+                structure?.nodes
+                  .filter((node) => peopleProfiles[node.id]?.avatarUrl)
+                  .slice(0, 3) ?? [];
+
+              return (
+                <button
+                  className={`radial-company-node${isExpanded ? " is-expanded" : ""}`}
+                  style={{ left: position.x, top: position.y }}
+                  key={company.id}
+                  onClick={() => {
+                    if (isExpanded) {
+                      openCompany(company.id);
+                      return;
+                    }
+                    setExpandedCompanyId(company.id);
+                  }}
+                  aria-pressed={isExpanded}
+                  aria-label={`${isExpanded ? "Open" : "Expand"} ${company.name} BD structure`}
+                >
+                  <span className="radial-company-topline">
+                    <CompanyMonogram
+                      initials={company.initials}
+                      accent={company.accent}
+                    />
+                    <span
+                      className={`relationship-pill relation-${company.relationship.toLowerCase()}`}
+                    >
+                      {company.relationship}
+                    </span>
                   </span>
-                </div>
-              )}
-              <div className="fit-line">
-                <span style={{ width: `${company.fit}%` }} />
-              </div>
-            </button>
-          ))}
+                  <strong>{company.shortName}</strong>
+                  <small>
+                    {structure?.nodes.length ?? 0} mapped people · fit{" "}
+                    {company.fit}
+                  </small>
+                  {mapDepth !== "Companies" && (
+                    <span className="radial-company-foot">
+                      {portraitNodes.map((node) => (
+                        <PersonAvatar
+                          key={node.id}
+                          name={node.name}
+                          profile={peopleProfiles[node.id]}
+                        />
+                      ))}
+                      {!portraitNodes.length && <span>BD line to map</span>}
+                      <b>{isExpanded ? "Open structure ↗" : "Expand line +"}</b>
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+
+            {activeBranches.map((branch, index) => (
+              <button
+                className={`radial-branch-node${branch.isPlaceholder ? " is-placeholder" : ""}`}
+                style={{
+                  left: activeBranchPositions[index]?.x,
+                  top: activeBranchPositions[index]?.y,
+                }}
+                key={branch.id}
+                onClick={() =>
+                  activeCompany && openCompany(activeCompany.id, "structure")
+                }
+              >
+                {mapDepth === "People" && (
+                  <PersonAvatar name={branch.name} profile={branch.profile} />
+                )}
+                <span>
+                  <strong>{branch.name}</strong>
+                  <small>{branch.role}</small>
+                </span>
+              </button>
+            ))}
+
+            <div className="network-map-instruction">
+              <span>{mapDepth}</span>
+              <strong>
+                {activeCompany
+                  ? `${activeCompany.shortName} BD line is open`
+                  : "Choose a company"}
+              </strong>
+              <small>
+                Click another company to expand it. Click the open company or
+                any branch to enter the full sourced structure.
+              </small>
+            </div>
+          </div>
         </div>
         {visibleCompanies.length === 0 && (
           <div className="empty-state">
@@ -817,15 +1043,17 @@ function MapView({
           ))}
         </div>
         <div className="map-callout">
-          <span className="callout-mark">↗</span>
+          <span className="callout-mark">E</span>
           <div>
-            <strong>Highest-leverage move</strong>
+            <strong>Eric stays at the center</strong>
             <p>
-              AstraZeneca has the strongest combination of fit, active routes
-              and a near-term action.
+              Company intelligence, people, relationships and next actions all
+              connect back to one BD owner.
             </p>
           </div>
-          <button onClick={() => openCompany("astrazeneca")}>Open workspace</button>
+          <button onClick={() => openCompany("astrazeneca")}>
+            Open priority route
+          </button>
         </div>
       </section>
     </div>
